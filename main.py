@@ -107,15 +107,15 @@ directories_to_process = [
     os.path.join(os.path.expanduser("~"), "Downloads")
 ]
 
-# # Add other drives (Windows-specific)
-# if os.name == 'nt':
-#     import string
-#     drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
-#     directories_to_process.extend(drives)
-# else:
-#     directories_to_process.extend([
-#         "/mnt", "/media", "/run/media"
-#     ])
+# Add other drives (Windows-specific)
+if os.name == 'nt':
+    import string
+    drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+    directories_to_process.extend(drives)
+else:
+    directories_to_process.extend([
+        "/mnt", "/media", "/run/media"
+    ])
 
 
 # 🔒 Main Execution with Multithreading
